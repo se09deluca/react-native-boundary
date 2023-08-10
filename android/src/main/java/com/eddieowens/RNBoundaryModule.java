@@ -4,10 +4,14 @@ import android.Manifest;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.support.annotation.NonNull;
-import android.support.v4.app.ActivityCompat;
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+import androidx.core.app.ActivityCompat;
+
+import android.os.Build;
 import android.util.Log;
 
+import com.eddieowens.errors.GeofenceErrorMessages;
 import com.eddieowens.receivers.BoundaryEventBroadcastReceiver;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.LifecycleEventListener;
@@ -19,6 +23,7 @@ import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 import com.google.android.gms.location.Geofence;
+import com.google.android.gms.location.GeofenceStatusCodes;
 import com.google.android.gms.location.GeofencingClient;
 import com.google.android.gms.location.GeofencingRequest;
 import com.google.android.gms.location.LocationServices;
@@ -26,8 +31,10 @@ import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 public class RNBoundaryModule extends ReactContextBaseJavaModule implements LifecycleEventListener {
 
@@ -135,14 +142,14 @@ public class RNBoundaryModule extends ReactContextBaseJavaModule implements Life
             return mBoundaryPendingIntent;
         }
         Intent intent = new Intent(getReactApplicationContext(), BoundaryEventBroadcastReceiver.class);
-        mBoundaryPendingIntent = PendingIntent.getBroadcast(getReactApplicationContext(), 0, intent, PendingIntent.
-                FLAG_UPDATE_CURRENT);
+
+      final int flag =  Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE : PendingIntent.FLAG_UPDATE_CURRENT;
+      mBoundaryPendingIntent = PendingIntent.getBroadcast(getReactApplicationContext(), 0, intent, PendingIntent.FLAG_MUTABLE);
         return mBoundaryPendingIntent;
     }
 
     private void addGeofence(final Promise promise, final GeofencingRequest geofencingRequest, final WritableArray geofenceRequestIds) {
         int permission = ActivityCompat.checkSelfPermission(getReactApplicationContext(), Manifest.permission.ACCESS_FINE_LOCATION);
-
 
         if (permission != PackageManager.PERMISSION_GRANTED) {
             permission = requestPermissions();
@@ -152,6 +159,8 @@ public class RNBoundaryModule extends ReactContextBaseJavaModule implements Life
         if (permission != PackageManager.PERMISSION_GRANTED) {
             promise.reject("PERM", "Access fine location is not permitted");
         } else {
+          Log.i(TAG, "Add geofence called..." );
+          Log.i(TAG,geofencingRequest.toString());
             mGeofencingClient.addGeofences(
                     geofencingRequest,
                     getBoundaryPendingIntent()
@@ -177,7 +186,9 @@ public class RNBoundaryModule extends ReactContextBaseJavaModule implements Life
 
 
         if (permission != PackageManager.PERMISSION_GRANTED) {
-            permission = requestPermissions();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                permission = requestPermissions();
+            }
         }
 
         if (permission != PackageManager.PERMISSION_GRANTED) {
@@ -199,7 +210,12 @@ public class RNBoundaryModule extends ReactContextBaseJavaModule implements Life
                     .addOnFailureListener(new OnFailureListener() {
                         @Override
                         public void onFailure(@NonNull Exception e) {
-                            Log.i(TAG, "Failed to add geofence.");
+                            if(Objects.equals(e.getMessage(), "1004: ")) {
+                                promise.reject(new Exception(GeofenceStatusCodes
+                                        .getStatusCodeString(1004)));
+                            } else {
+                                Log.i(TAG, "Failed to add geofence. ");
+                            }
                             promise.reject(e);
                         }
                     });
@@ -225,11 +241,13 @@ public class RNBoundaryModule extends ReactContextBaseJavaModule implements Life
                 });
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.Q)
     private int requestPermissions() {
-        ActivityCompat.requestPermissions(getReactApplicationContext().getCurrentActivity(),
+        ActivityCompat.requestPermissions(Objects.requireNonNull(getReactApplicationContext().getCurrentActivity()),
                 new String[]{
                         Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_BACKGROUND_LOCATION
                 }, 1);
 
         return ActivityCompat.checkSelfPermission(getReactApplicationContext(), Manifest.permission.ACCESS_FINE_LOCATION);
